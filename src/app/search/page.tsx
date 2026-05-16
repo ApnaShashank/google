@@ -1,7 +1,8 @@
 import Link from "next/link";
 import SearchHeader from "@/components/SearchHeader";
 import Sidebar from "@/components/Sidebar";
-import { Plus, Mic, ChevronDown, Sparkles } from "lucide-react";
+import ChatInput from "@/components/ChatInput";
+import { ChevronDown, Sparkles } from "lucide-react";
 
 async function getSearchResults(query: string) {
   const apiKey = process.env.SERP_API_KEY;
@@ -20,6 +21,66 @@ async function getSearchResults(query: string) {
     console.error("Error fetching search results:", error);
     return null;
   }
+}
+
+async function getAiSummary(query: string) {
+  const mistralKey = process.env.MISTRAL_API_KEY;
+  if (mistralKey) {
+    try {
+      const res = await fetch("https://api.mistral.ai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${mistralKey}`
+        },
+        body: JSON.stringify({
+          model: "open-mistral-7b",
+          messages: [
+            {
+              role: "system",
+              content: "You are the Google AI Search overview assistant. Generate a highly informative, structured response for the user's search query. Highlight the most crucial direct answer in your first sentence. Keep the entire response under 100 words and write as a plain paragraph without headers."
+            },
+            {
+              role: "user",
+              content: query
+            }
+          ]
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return data.choices?.[0]?.message?.content || "";
+      }
+    } catch (e) {
+      console.error("Mistral API call failed, trying Cohere:", e);
+    }
+  }
+
+  // Fallback to Cohere if Mistral fails or is not available
+  const cohereKey = process.env.COHERE_API_KEY;
+  if (cohereKey) {
+    try {
+      const res = await fetch("https://api.cohere.com/v1/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${cohereKey}`
+        },
+        body: JSON.stringify({
+          message: `You are the Google AI Search overview assistant. Generate an informative search summary (under 100 words) for: ${query}. Make the very first sentence a direct answer.`
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return data.text || "";
+      }
+    } catch (e) {
+      console.error("Cohere API call failed:", e);
+    }
+  }
+
+  // Final fallback snippet if both key connections fail
+  return "Could not connect to AI services at the moment. However, we have fetched the latest live organic search results for your query below.";
 }
 
 export default async function SearchPage({
@@ -46,6 +107,17 @@ export default async function SearchPage({
   const results = await getSearchResults(q);
 
   if (isAi) {
+    // Fetch AI Summary dynamically using Mistral / Cohere API
+    const aiSummary = await getAiSummary(q);
+    const firstPeriodIdx = aiSummary.indexOf(". ");
+    let firstSentence = aiSummary;
+    let remainingText = "";
+
+    if (firstPeriodIdx !== -1) {
+      firstSentence = aiSummary.substring(0, firstPeriodIdx + 1);
+      remainingText = aiSummary.substring(firstPeriodIdx + 2);
+    }
+
     return (
       <div className="flex min-h-screen bg-[#22242A] text-gray-200">
         {/* Left Sidebar */}
@@ -68,10 +140,13 @@ export default async function SearchPage({
 
                 {/* AI Text Output */}
                 <div className="space-y-4">
-                  <p className="text-base text-gray-100 leading-relaxed">
-                    <strong className="text-lg text-gray-100 block mb-2 font-medium">Artificial Intelligence (AI)</strong>
-                    is <span className="bg-[#2a4365] text-[#a8c7fa] px-1.5 py-0.5 rounded font-medium">a branch of computer science focused on creating computer systems and machines capable of performing tasks that traditionally require human intelligence</span>. These cognitive tasks include learning from experience, recognizing patterns, understanding natural language, making complex decisions, and solving problems.
-                  </p>
+                  <div className="text-base text-gray-100 leading-relaxed">
+                    <strong className="text-lg text-gray-100 block mb-2 font-medium">AI Overview</strong>
+                    <span className="bg-[#2a4365] text-[#a8c7fa] px-1.5 py-0.5 rounded font-medium inline mr-1 leading-loose">
+                      {firstSentence}
+                    </span>{" "}
+                    <span>{remainingText}</span>
+                  </div>
                 </div>
 
                 {/* Image Cards Row */}
@@ -114,22 +189,8 @@ export default async function SearchPage({
                 </div>
               </div>
 
-              {/* Bottom "Ask anything" Input Bar */}
-              <div className="pt-6">
-                <div className="flex items-center w-full px-4 py-3 bg-[#303134] border border-[#4d5162] rounded-2xl">
-                  <button className="text-gray-400 hover:text-white mr-3">
-                    <Plus className="w-5 h-5" />
-                  </button>
-                  <input
-                    type="text"
-                    placeholder="Ask anything"
-                    className="flex-grow bg-transparent outline-none text-sm text-gray-200"
-                  />
-                  <button className="text-gray-400 hover:text-white ml-3">
-                    <Mic className="w-5 h-5" />
-                  </button>
-                </div>
-              </div>
+              {/* Bottom Interactive "Ask anything" Chat Input */}
+              <ChatInput placeholder="Ask a follow-up question..." />
             </div>
 
             {/* Right Column ("17 sites" panel) */}
